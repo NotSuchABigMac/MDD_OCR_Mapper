@@ -367,4 +367,91 @@ Mapped value for Widget Pro</textarea>
 
     async function scanOcrOnce() {
       const { canvas: c } = captureToCanvas() || {};
-      if (!c) throw new Err
+      if (!c) throw new Error("No video frame");
+
+      preprocessImage();
+
+      const { data } = await Tesseract.recognize(c, "eng", {
+        logger: () => {},
+        // You can uncomment these for some cases:
+        // tessedit_pageseg_mode: 6, // assume a block of text
+      });
+
+      const raw = data?.text || "";
+      return { raw, textNorm: normalize(raw) };
+    }
+
+    async function scanOnce() {
+      if (!stream) { setStatus("Start the camera first", "warn"); return; }
+      if (busy) return;
+
+      const { a, b } = parseLists();
+      if (a.length === 0) { setStatus("List A is empty", "warn"); return; }
+      if (b.length < a.length) { setStatus("List B has fewer lines than List A", "warn"); return; }
+
+      setBusy(true);
+      setStatus("Scanning...", "warn");
+      const t0 = performance.now();
+
+      try {
+        let res;
+        if (modeEl.value === "barcode") {
+          res = await scanBarcodeOnce();
+        } else {
+          res = await scanOcrOnce();
+        }
+
+        ocrTextEl.textContent = res.textNorm || "-";
+
+        const minScore = Math.max(0, Math.min(1, Number(minScoreEl.value || 0.85)));
+
+        let bestIdx = -1;
+        let bestScore = 0;
+
+        for (let i = 0; i < a.length; i++) {
+          const s = scoreMatch(a[i], res.textNorm);
+          if (s > bestScore) { bestScore = s; bestIdx = i; }
+          if (s === 1) break;
+        }
+
+        if (bestIdx >= 0 && bestScore >= minScore) {
+          paintOutput(a[bestIdx], b[bestIdx] ?? "", bestScore);
+          setStatus("Match found", "ok");
+        } else {
+          paintOutput("-", "-", bestScore || null);
+          setStatus("No match", "warn");
+        }
+      } catch (e) {
+        setStatus("Scan error: " + (e?.message || String(e)), "err");
+      } finally {
+        const t1 = performance.now();
+        lastMsEl.textContent = Math.round(t1 - t0) + " ms";
+        setBusy(false);
+      }
+    }
+
+    function startAuto() {
+      if (!stream) { setStatus("Start the camera first", "warn"); return; }
+      if (timer) return;
+      const ms = Math.max(300, Number(intervalMsEl.value || 900));
+      autoOnBtn.disabled = true;
+      autoOffBtn.disabled = false;
+      setStatus("Auto scanning...", "ok");
+      timer = setInterval(() => { if (!busy) scanOnce(); }, ms);
+    }
+
+    startCamBtn.addEventListener("click", async () => {
+      try { await startCamera(); }
+      catch (e) { setStatus("Camera error: " + (e?.message || String(e)), "err"); }
+    });
+    stopCamBtn.addEventListener("click", stopCamera);
+    scanOnceBtn.addEventListener("click", scanOnce);
+    autoOnBtn.addEventListener("click", startAuto);
+    autoOffBtn.addEventListener("click", stopScanning);
+
+    // Reset output when lists change (optional)
+    listAEl.addEventListener("input", () => paintOutput("-", "-", null));
+    listBEl.addEventListener("input", () => paintOutput("-", "-", null));
+  </script>
+</body>
+</html>
