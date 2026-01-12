@@ -1,416 +1,370 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import Tesseract from "tesseract.js";
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera Mapper</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 16px; background: #f7f7f7; color: #111; }
+    .wrap { max-width: 1400px; margin: 0 auto; }
+    .top { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; }
+    .title h1 { margin:0; font-size: 22px; }
+    .muted { color:#555; font-size: 13px; }
+    .banner { border:1px solid #ddd; background:#fff; border-radius:14px; padding:10px 12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .ok { color:#0a7; font-weight:600; }
+    .warn { color:#b60; font-weight:600; }
+    .err { color:#c00; font-weight:600; }
 
-function normalize(s) {
-  return (s || "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, "")
-    .trim();
-}
+    .grid { display:grid; gap:12px; grid-template-columns: 1fr; margin-top:12px; }
+    @media (min-width: 1200px) { .grid { grid-template-columns: 5fr 4fr 3fr; } }
 
-function scoreMatch(target, textNorm) {
-  const t = normalize(target);
-  if (!t) return 0;
-  if (textNorm.includes(t)) return 1;
+    .card { background:#fff; border:1px solid #ddd; border-radius:16px; padding:12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    button { padding: 10px 12px; border-radius: 12px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #111; color: #fff; border-color:#111; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
 
-  const tTokens = new Set(t.split(" ").filter(Boolean));
-  const xTokens = new Set(textNorm.split(" ").filter(Boolean));
-  if (tTokens.size === 0) return 0;
+    video { width:100%; background:#111; border-radius: 14px; }
+    canvas { display:none; }
+    textarea { width:100%; border:1px solid #ccc; border-radius:14px; padding:10px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+    .small { font-size: 12px; color:#666; }
 
-  let hit = 0;
-  for (const tok of tTokens) if (xTokens.has(tok)) hit++;
-  return hit / tTokens.size;
-}
+    .bigOut { border-radius:18px; padding:16px; }
+    .bigGood { background:#0a7; color:#fff; }
+    .bigIdle { background:#e5e5e5; color:#333; }
+    .bigLabel { font-size: 12px; opacity:.9; }
+    .bigValue { margin-top:8px; font-size: 38px; font-weight: 700; line-height: 1.1; word-break: break-word; }
+    .chips { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
+    .chip { background: rgba(0,0,0,.12); padding: 6px 10px; border-radius: 999px; font-size: 13px; }
 
-function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n));
-}
+    .inputs { display:grid; gap:10px; }
+    input[type="number"], input[type="range"], select {
+      padding:8px; border-radius:12px; border:1px solid #ccc;
+    }
+    pre { white-space: pre-wrap; word-break: break-word; background:#fafafa; border:1px solid #ddd; border-radius:14px; padding:10px; font-size: 12px; }
+    .roiBox { border:2px dashed rgba(255,255,255,.55); position:absolute; inset: 18% 12%; border-radius: 12px; pointer-events:none; }
+    .videoWrap { position: relative; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="title">
+        <h1>Camera Mapper</h1>
+        <div class="muted">Horizontal layout. Big output. List A line N maps to List B line N.</div>
+      </div>
+      <div class="row">
+        <button class="primary" id="startCam">Start camera</button>
+        <button id="scanOnce" disabled>Scan</button>
+        <button id="autoOn" disabled>Auto</button>
+        <button id="autoOff" disabled>Stop</button>
+        <button id="stopCam" disabled>Close camera</button>
+      </div>
+    </div>
 
-export default function App() {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamRef = useRef(null);
+    <div class="banner" style="margin-top:12px;">
+      <div>Status: <span id="status" class="warn">Idle</span></div>
+      <div class="small">Last scan: <span id="lastMs">-</span></div>
+    </div>
 
-  const [listA, setListA] = useState("ABC123
+    <div class="grid">
+      <!-- Camera -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:flex-end;">
+          <div style="font-weight:700;">Camera</div>
+          <div class="row">
+            <label class="small">Mode
+              <select id="mode">
+                <option value="ocr">OCR</option>
+                <option value="barcode">BarcodeDetector (if supported)</option>
+              </select>
+            </label>
+            <label class="small">Interval (ms)
+              <input id="intervalMs" type="number" min="300" step="100" value="900" />
+            </label>
+            <label class="small">Min score
+              <input id="minScore" type="number" min="0" max="1" step="0.01" value="0.85" />
+            </label>
+          </div>
+        </div>
+
+        <div class="videoWrap" style="margin-top:10px;">
+          <video id="video" autoplay playsinline muted></video>
+          <div id="roiOverlay" class="roiBox" style="display:none;"></div>
+        </div>
+
+        <canvas id="canvas"></canvas>
+
+        <div class="inputs" style="margin-top:10px;">
+          <label class="small">
+            Use ROI crop (improves OCR a lot)
+            <select id="useRoi">
+              <option value="yes" selected>Yes</option>
+              <option value="no">No</option>
+            </select>
+          </label>
+
+          <label class="small">
+            Contrast boost (OCR)
+            <input id="contrast" type="range" min="0" max="60" value="25" />
+          </label>
+
+          <div class="small">
+            Tips: Make text big in frame. Use ROI. Avoid motion blur. Bright, even light.
+          </div>
+        </div>
+      </div>
+
+      <!-- Output -->
+      <div class="card">
+        <div style="font-weight:700;">Output</div>
+
+        <div id="bigOut" class="bigOut bigIdle" style="margin-top:10px;">
+          <div class="bigLabel">Returned value</div>
+          <div id="returnedB" class="bigValue">-</div>
+          <div class="chips">
+            <div class="chip">Matched: <span id="matchedA">-</span></div>
+            <div class="chip">Score: <span id="confidence">-</span></div>
+            <div class="chip">Busy: <span id="busy">No</span></div>
+          </div>
+        </div>
+
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer; font-weight:700;">Last read text</summary>
+          <pre id="ocrText">-</pre>
+        </details>
+      </div>
+
+      <!-- Lists -->
+      <div class="card">
+        <div style="font-weight:700;">Lists</div>
+        <div class="small" style="margin-top:6px;">Line positions must match.</div>
+
+        <div style="margin-top:10px;">
+          <div class="small" style="font-weight:700;">List A (find)</div>
+          <textarea id="listA" rows="7">ABC123
 Invoice Total
-Widget Pro");
-  const [listB, setListB] = useState(
-    "Mapped value for ABC123
+Widget Pro</textarea>
+        </div>
+
+        <div style="margin-top:10px;">
+          <div class="small" style="font-weight:700;">List B (return)</div>
+          <textarea id="listB" rows="7">Mapped value for ABC123
 Mapped value for Invoice Total
-Mapped value for Widget Pro"
-  );
-
-  const [busy, setBusy] = useState(false);
-  const [scanning, setScanning] = useState(false);
-
-  const [intervalMs, setIntervalMs] = useState(900);
-  const [minScore, setMinScore] = useState(0.85);
-
-  const [ocrText, setOcrText] = useState("-");
-  const [matchedA, setMatchedA] = useState("-");
-  const [returnedB, setReturnedB] = useState("-");
-  const [confidence, setConfidence] = useState("-");
-  const [lastMs, setLastMs] = useState("-");
-
-  const [banner, setBanner] = useState({
-    text: "Ready",
-    tone: "neutral", // neutral | ok | warn | err
-  });
-
-  const parsed = useMemo(() => {
-    const a = listA
-      .split("
-")
-      .map((x) => x.trim())
-      .filter(Boolean);
-    const b = listB.split("
-").map((x) => x.trim());
-    return { a, b };
-  }, [listA, listB]);
-
-  function setBannerTone(text, tone) {
-    setBanner({ text, tone });
-  }
-
-  async function startCamera() {
-    if (streamRef.current) return;
-    setBannerTone("Requesting camera permission...", "neutral");
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "environment",
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-      audio: false,
-    });
-
-    streamRef.current = stream;
-    const video = videoRef.current;
-    if (!video) return;
-    video.srcObject = stream;
-    await new Promise((resolve) => {
-      video.onloadedmetadata = () => resolve(true);
-    });
-
-    setBannerTone("Camera ready", "ok");
-  }
-
-  function stopCamera() {
-    const s = streamRef.current;
-    if (!s) return;
-    for (const t of s.getTracks()) t.stop();
-    streamRef.current = null;
-    const video = videoRef.current;
-    if (video) video.srcObject = null;
-    setScanning(false);
-    setBannerTone("Camera stopped", "neutral");
-  }
-
-  function captureFrame() {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return null;
-
-    const w = video.videoWidth;
-    const h = video.videoHeight;
-    if (!w || !h) return null;
-
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-
-    ctx.drawImage(video, 0, 0, w, h);
-    return canvas;
-  }
-
-  async function ocrOnce() {
-    if (!streamRef.current) {
-      setBannerTone("Start the camera first", "warn");
-      return;
-    }
-    if (busy) return;
-
-    if (parsed.a.length === 0) {
-      setBannerTone("List A is empty", "warn");
-      return;
-    }
-    if (parsed.b.length < parsed.a.length) {
-      setBannerTone("List B has fewer lines than List A", "warn");
-      return;
-    }
-
-    setBusy(true);
-    const t0 = performance.now();
-    setBannerTone("Scanning...", "neutral");
-
-    try {
-      const frame = captureFrame();
-      if (!frame) throw new Error("No video frame available");
-
-      const { data } = await Tesseract.recognize(frame, "eng", {
-        logger: () => {},
-      });
-
-      const raw = data?.text || "";
-      const textNorm = normalize(raw);
-      setOcrText(textNorm || "-");
-
-      let bestIdx = -1;
-      let bestScore = 0;
-
-      for (let i = 0; i < parsed.a.length; i++) {
-        const s = scoreMatch(parsed.a[i], textNorm);
-        if (s > bestScore) {
-          bestScore = s;
-          bestIdx = i;
-        }
-        if (s === 1) break;
-      }
-
-      const threshold = clamp(Number(minScore) || 0.85, 0, 1);
-
-      if (bestIdx >= 0 && bestScore >= threshold) {
-        setMatchedA(parsed.a[bestIdx]);
-        setReturnedB(parsed.b[bestIdx] ?? "");
-        setConfidence(bestScore.toFixed(2));
-        setBannerTone("Match found", "ok");
-      } else {
-        setMatchedA("-");
-        setReturnedB("-");
-        setConfidence(bestScore ? bestScore.toFixed(2) : "-");
-        setBannerTone("No match", "warn");
-      }
-    } catch (e) {
-      setBannerTone(`OCR error: ${e?.message || String(e)}`, "err");
-    } finally {
-      const t1 = performance.now();
-      setLastMs(`${Math.round(t1 - t0)} ms`);
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!scanning) return;
-    const ms = Math.max(300, Number(intervalMs) || 900);
-    const id = window.setInterval(() => {
-      if (!busy) ocrOnce();
-    }, ms);
-    return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanning, intervalMs, minScore, parsed, busy]);
-
-  useEffect(() => {
-    return () => {
-      setScanning(false);
-      stopCamera();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const canScan = !!streamRef.current;
-
-  const bannerClasses =
-    banner.tone === "ok"
-      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-      : banner.tone === "warn"
-        ? "bg-amber-50 border-amber-200 text-amber-900"
-        : banner.tone === "err"
-          ? "bg-red-50 border-red-200 text-red-900"
-          : "bg-neutral-50 border-neutral-200 text-neutral-900";
-
-  const bigReturnClasses =
-    returnedB !== "-" && returnedB !== ""
-      ? "bg-emerald-600 text-white"
-      : "bg-neutral-200 text-neutral-700";
-
-  return (
-    <div className="min-h-screen bg-neutral-50 text-neutral-900">
-      <div className="max-w-[1400px] mx-auto p-4 md:p-6 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold">Camera OCR Mapper</h1>
-            <p className="text-sm text-neutral-600">
-              Horizontal layout. Big, obvious output. Line N in List A maps to line N in List B.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2 items-center">
-            <button
-              className="px-4 py-2 rounded-xl bg-neutral-900 text-white disabled:opacity-50"
-              onClick={startCamera}
-              disabled={!!streamRef.current}
-            >
-              Start camera
-            </button>
-            <button
-              className="px-4 py-2 rounded-xl bg-white border disabled:opacity-50"
-              onClick={ocrOnce}
-              disabled={!canScan || busy}
-              title="Run one OCR scan"
-            >
-              Scan
-            </button>
-            <button
-              className="px-4 py-2 rounded-xl bg-white border disabled:opacity-50"
-              onClick={() => setScanning(true)}
-              disabled={!canScan || scanning}
-            >
-              Auto
-            </button>
-            <button
-              className="px-4 py-2 rounded-xl bg-white border disabled:opacity-50"
-              onClick={() => setScanning(false)}
-              disabled={!scanning}
-            >
-              Stop
-            </button>
-            <button
-              className="px-4 py-2 rounded-xl bg-white border disabled:opacity-50"
-              onClick={stopCamera}
-              disabled={!streamRef.current}
-            >
-              Close camera
-            </button>
-          </div>
+Mapped value for Widget Pro</textarea>
         </div>
 
-        <div className={`rounded-2xl border px-4 py-3 text-sm ${bannerClasses}`}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="font-semibold">{banner.text}</div>
-            <div className="text-xs opacity-80">Last scan: {lastMs}</div>
-          </div>
-          {!navigator?.mediaDevices?.getUserMedia ? (
-            <div className="mt-2 font-semibold">This environment does not support camera access.</div>
-          ) : null}
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-          <div className="xl:col-span-5 rounded-2xl bg-white shadow-sm border p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold">Camera</div>
-              <div className="flex items-end gap-3">
-                <label className="text-xs text-neutral-600">
-                  Interval (ms)
-                  <input
-                    className="block mt-1 w-28 p-2 border rounded-xl text-sm"
-                    type="number"
-                    min={300}
-                    step={100}
-                    value={intervalMs}
-                    onChange={(e) => setIntervalMs(Number(e.target.value))}
-                  />
-                </label>
-                <label className="text-xs text-neutral-600">
-                  Min score
-                  <input
-                    className="block mt-1 w-24 p-2 border rounded-xl text-sm"
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={minScore}
-                    onChange={(e) => setMinScore(Number(e.target.value))}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="rounded-2xl overflow-hidden bg-neutral-900">
-              <video ref={videoRef} autoPlay playsInline muted className="w-full" />
-            </div>
-            <canvas ref={canvasRef} className="hidden" />
-
-            <div className="text-xs text-neutral-600">
-              Tip: keep the target text large in frame. If it is slow, increase interval.
-            </div>
-          </div>
-
-          <div className="xl:col-span-4 rounded-2xl shadow-sm border p-4 bg-white space-y-3">
-            <div className="text-sm font-semibold">Output</div>
-
-            <div className={`rounded-2xl p-5 ${bigReturnClasses}`}>
-              <div className="text-xs opacity-90">Returned value</div>
-              <div className="mt-2 text-3xl md:text-4xl font-semibold leading-tight break-words">
-                {returnedB}
-              </div>
-              <div className="mt-4 flex flex-wrap gap-3 text-sm">
-                <div className="px-3 py-1 rounded-xl bg-black/10">
-                  <span className="opacity-80">Matched: </span>
-                  <span className="font-semibold">{matchedA}</span>
-                </div>
-                <div className="px-3 py-1 rounded-xl bg-black/10">
-                  <span className="opacity-80">Score: </span>
-                  <span className="font-semibold">{confidence}</span>
-                </div>
-                <div className="px-3 py-1 rounded-xl bg-black/10">
-                  <span className="opacity-80">Mode: </span>
-                  <span className="font-semibold">{scanning ? "Auto" : "Manual"}</span>
-                </div>
-                {busy ? (
-                  <div className="px-3 py-1 rounded-xl bg-black/10">
-                    <span className="font-semibold">Scanning..."</span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            <details className="rounded-2xl border bg-neutral-50 px-4 py-3">
-              <summary className="cursor-pointer text-sm font-semibold">OCR text (normalized)</summary>
-              <pre className="mt-3 p-3 rounded-xl bg-white border text-xs whitespace-pre-wrap break-words">
-                {ocrText}
-              </pre>
-            </details>
-          </div>
-
-          <div className="xl:col-span-3 rounded-2xl bg-white shadow-sm border p-4 space-y-3">
-            <div className="text-sm font-semibold">Lists</div>
-            <p className="text-xs text-neutral-600">
-              Keep these short where possible. Line positions must match.
-            </p>
-
-            <div>
-              <div className="text-xs font-semibold text-neutral-700">List A (find)</div>
-              <textarea
-                className="w-full h-32 mt-2 p-3 border rounded-2xl font-mono text-xs"
-                value={listA}
-                onChange={(e) => setListA(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold text-neutral-700">List B (return)</div>
-              <textarea
-                className="w-full h-32 mt-2 p-3 border rounded-2xl font-mono text-xs"
-                value={listB}
-                onChange={(e) => setListB(e.target.value)}
-              />
-            </div>
-
-            <div className="rounded-2xl border bg-neutral-50 px-4 py-3 text-xs text-neutral-700">
-              <div className="font-semibold">Quick checks</div>
-              <ul className="mt-2 list-disc pl-4 space-y-1">
-                <li>List A lines: {parsed.a.length}</li>
-                <li>List B lines: {parsed.b.length}</li>
-                <li>
-                  Pairing:
-                  {parsed.b.length < parsed.a.length ? (
-                    <span className="ml-2 font-semibold text-amber-700">List B too short</span>
-                  ) : (
-                    <span className="ml-2 font-semibold text-emerald-700">OK</span>
-                  )}
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <div className="text-xs text-neutral-600">
-          Matching: exact phrase containment wins, otherwise token overlap. If your targets are short codes, consider increasing Min score to 1.0.
+        <div class="small" style="margin-top:10px;">
+          If your inputs are codes, consider switching Mode to BarcodeDetector and using QR codes.
         </div>
       </div>
     </div>
-  );
-}
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+
+    const video = el("video");
+    const canvas = el("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const startCamBtn = el("startCam");
+    const stopCamBtn = el("stopCam");
+    const scanOnceBtn = el("scanOnce");
+    const autoOnBtn = el("autoOn");
+    const autoOffBtn = el("autoOff");
+
+    const statusEl = el("status");
+    const lastMsEl = el("lastMs");
+
+    const matchedAEl = el("matchedA");
+    const returnedBEl = el("returnedB");
+    const confidenceEl = el("confidence");
+    const ocrTextEl = el("ocrText");
+    const bigOut = el("bigOut");
+    const busyEl = el("busy");
+
+    const intervalMsEl = el("intervalMs");
+    const minScoreEl = el("minScore");
+    const listAEl = el("listA");
+    const listBEl = el("listB");
+    const useRoiEl = el("useRoi");
+    const roiOverlay = el("roiOverlay");
+    const contrastEl = el("contrast");
+    const modeEl = el("mode");
+
+    let stream = null;
+    let timer = null;
+    let busy = false;
+
+    function setBusy(v) {
+      busy = v;
+      busyEl.textContent = v ? "Yes" : "No";
+    }
+
+    function setStatus(text, tone) {
+      statusEl.textContent = text;
+      statusEl.className = tone || "warn";
+    }
+
+    function normalize(s) {
+      return (s || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .replace(/[^\p{L}\p{N}\s]/gu, "")
+        .trim();
+    }
+
+    function parseLists() {
+      const a = listAEl.value.split("\n").map(x => x.trim()).filter(Boolean);
+      const b = listBEl.value.split("\n").map(x => x.trim());
+      return { a, b };
+    }
+
+    function scoreMatch(target, textNorm) {
+      const t = normalize(target);
+      if (!t) return 0;
+      if (textNorm.includes(t)) return 1;
+
+      const tTokens = new Set(t.split(" ").filter(Boolean));
+      const xTokens = new Set(textNorm.split(" ").filter(Boolean));
+      if (tTokens.size === 0) return 0;
+
+      let hit = 0;
+      for (const tok of tTokens) if (xTokens.has(tok)) hit++;
+      return hit / tTokens.size;
+    }
+
+    function paintOutput(matchedA, returnedB, score) {
+      matchedAEl.textContent = matchedA || "-";
+      returnedBEl.textContent = returnedB || "-";
+      confidenceEl.textContent = (score === null || score === undefined) ? "-" : score.toFixed(2);
+
+      const good = returnedB && returnedB !== "-";
+      bigOut.className = "bigOut " + (good ? "bigGood" : "bigIdle");
+    }
+
+    async function startCamera() {
+      if (stream) return;
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setStatus("Camera not supported in this browser", "err");
+        return;
+      }
+
+      setStatus("Requesting camera permission...", "warn");
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+
+      video.srcObject = stream;
+      await new Promise(resolve => (video.onloadedmetadata = resolve));
+
+      scanOnceBtn.disabled = false;
+      autoOnBtn.disabled = false;
+      stopCamBtn.disabled = false;
+
+      setStatus("Camera ready", "ok");
+    }
+
+    function stopScanning() {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+      autoOnBtn.disabled = !stream;
+      autoOffBtn.disabled = true;
+      setStatus("Scan stopped", "warn");
+    }
+
+    function stopCamera() {
+      if (!stream) return;
+      stopScanning();
+      for (const t of stream.getTracks()) t.stop();
+      stream = null;
+      video.srcObject = null;
+
+      scanOnceBtn.disabled = true;
+      autoOnBtn.disabled = true;
+      autoOffBtn.disabled = true;
+      stopCamBtn.disabled = true;
+
+      setStatus("Camera stopped", "warn");
+    }
+
+    function captureToCanvas() {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) return null;
+
+      canvas.width = w;
+      canvas.height = h;
+
+      const useRoi = useRoiEl.value === "yes";
+      roiOverlay.style.display = useRoi ? "block" : "none";
+
+      if (!useRoi) {
+        ctx.drawImage(video, 0, 0, w, h);
+        return { canvas, roi: null };
+      }
+
+      // ROI: center-ish box matching overlay: inset 18% top/bottom, 12% left/right
+      const sx = Math.round(w * 0.12);
+      const sy = Math.round(h * 0.18);
+      const sw = Math.round(w * 0.76);
+      const sh = Math.round(h * 0.64);
+
+      // Draw cropped ROI scaled to full canvas (improves OCR)
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+      return { canvas, roi: { sx, sy, sw, sh } };
+    }
+
+    function preprocessImage() {
+      // Basic grayscale + contrast boost
+      const w = canvas.width, h = canvas.height;
+      const img = ctx.getImageData(0, 0, w, h);
+      const d = img.data;
+      const boost = Number(contrastEl.value || 0); // 0..60
+
+      // Contrast formula: shift away from mid point (128)
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        let y = (0.299 * r + 0.587 * g + 0.114 * b);
+
+        // contrast boost
+        y = (y - 128) * (1 + boost / 50) + 128;
+
+        // clamp
+        y = Math.max(0, Math.min(255, y));
+        d[i] = d[i + 1] = d[i + 2] = y;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    async function scanBarcodeOnce() {
+      if (!("BarcodeDetector" in window)) {
+        setStatus("BarcodeDetector not supported here. Use OCR mode.", "err");
+        return { textNorm: "", raw: "" };
+      }
+
+      const detector = new BarcodeDetector({
+        formats: ["qr_code", "code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e", "itf"]
+      });
+
+      const { canvas: c } = captureToCanvas() || {};
+      if (!c) throw new Error("No video frame");
+      // Barcode detection prefers unmodified frames, so do not preprocess.
+
+      const barcodes = await detector.detect(c);
+      if (!barcodes || barcodes.length === 0) return { textNorm: "", raw: "" };
+
+      // Use first barcode value
+      const raw = String(barcodes[0].rawValue || "");
+      return { raw, textNorm: normalize(raw) };
+    }
+
+    async function scanOcrOnce() {
+      const { canvas: c } = captureToCanvas() || {};
+      if (!c) throw new Err
