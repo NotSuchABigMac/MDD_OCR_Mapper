@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera OCR List Mapper</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 16px; background: #fafafa; color: #111; }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 980px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 14px; padding: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+    textarea { width: 100%; height: 160px; border: 1px solid #ccc; border-radius: 12px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 13px; }
+    video { width: 100%; background: #111; border-radius: 12px; }
+    button { padding: 10px 12px; border-radius: 12px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #111; color: #fff; border-color: #111; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    input[type="number"] { width: 120px; padding: 8px; border-radius: 12px; border: 1px solid #ccc; }
+    .muted { color: #555; font-size: 13px; }
+    .ok { color: #0a7; font-weight: 600; }
+    .warn { color: #b60; font-weight: 600; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #fafafa; border: 1px solid #ddd; border-radius: 12px; padding: 10px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>Camera OCR List Mapper</h2>
+    <div class="muted">One entry per line. If a line from List A is found in the camera text, it returns the matching line from List B.</div>
+
+    <div class="grid" style="margin-top:12px;">
+      <div class="card">
+        <div style="font-weight:600; margin-bottom:6px;">List A (find these)</div>
+        <textarea id="listA">ABC123
+Invoice Total
+Widget Pro</textarea>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600; margin-bottom:6px;">List B (return these)</div>
+        <textarea id="listB">Mapped value for ABC123
+Mapped value for Invoice Total
+Mapped value for Widget Pro</textarea>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:12px;">
+      <div class="card">
+        <div class="row">
+          <button class="primary" id="startCam">Start camera</button>
+          <button id="scanOnce" disabled>Scan once</button>
+          <button id="startScan" disabled>Start scanning</button>
+          <button id="stopScan" disabled>Stop scanning</button>
+          <button id="stopCam" disabled>Stop camera</button>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <label class="muted">Scan every (ms)
+            <input id="intervalMs" type="number" min="300" step="100" value="1200" />
+          </label>
+          <label class="muted">Min match score (0-1)
+            <input id="minScore" type="number" min="0" max="1" step="0.01" value="0.85" />
+          </label>
+        </div>
+
+        <div style="margin-top:10px;" class="muted">
+          Status: <span id="status" class="warn">Idle</span><br />
+          Last OCR time: <span id="lastTime">-</span>
+        </div>
+
+        <div style="margin-top:10px;">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="canvas" style="display:none;"></canvas>
+        </div>
+
+        <div class="muted" style="margin-top:10px;">
+          Tip: If OCR is slow, increase scan interval. Bright lighting helps a lot.
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600;">Result</div>
+        <div style="margin-top:8px;">
+          <div><span class="muted">Matched A:</span> <span id="matchedA">-</span></div>
+          <div><span class="muted">Returned B:</span> <span id="returnedB">-</span></div>
+          <div><span class="muted">Confidence:</span> <span id="confidence">-</span></div>
+        </div>
+        <hr style="border:none;border-top:1px solid #eee;margin:12px 0;" />
+        <div class="muted">Last OCR text (normalized):</div>
+        <pre id="ocrText">-</pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+
+    const video = el("video");
+    const canvas = el("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const startCamBtn = el("startCam");
+    const stopCamBtn = el("stopCam");
+    const scanOnceBtn = el("scanOnce");
+    const startScanBtn = el("startScan");
+    const stopScanBtn = el("stopScan");
+
+    const statusEl = el("status");
+    const lastTimeEl = el("lastTime");
+
+    const matchedAEl = el("matchedA");
+    const returnedBEl = el("returnedB");
+    const confidenceEl = el("confidence");
+    const ocrTextEl = el("ocrText");
+
+    const intervalMsEl = el("intervalMs");
+    const minScoreEl = el("minScore");
+    const listAEl = el("listA");
+    const listBEl = el("listB");
+
+    let stream = null;
+    let timer = null;
+    let busy = false;
+
+    function setStatus(text, ok=false) {
+      statusEl.textContent = text;
+      statusEl.className = ok ? "ok" : "warn";
+    }
+
+    function normalize(s) {
+      return (s || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .replace(/[^\p{L}\p{N}\s]/gu, "")
+        .trim();
+    }
+
+    function parseLists() {
+      const a = listAEl.value.split("\n").map(x => x.trim()).filter(Boolean);
+      const b = listBEl.value.split("\n").map(x => x.trim());
+      return { a, b };
+    }
+
+    function scoreMatch(target, textNorm) {
+      const t = normalize(target);
+      if (!t) return 0;
+      if (textNorm.includes(t)) return 1;
+
+      const tTokens = new Set(t.split(" ").filter(Boolean));
+      const xTokens = new Set(textNorm.split(" ").filter(Boolean));
+      if (tTokens.size === 0) return 0;
+
+      let hit = 0;
+      for (const tok of tTokens) if (xTokens.has(tok)) hit++;
+      return hit / tTokens.size;
+    }
+
+    async function startCamera() {
+      if (stream) return;
+      setStatus("Requesting camera permission...");
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+
+      video.srcObject = stream;
+      await new Promise(resolve => (video.onloadedmetadata = resolve));
+
+      scanOnceBtn.disabled = false;
+      startScanBtn.disabled = false;
+      stopCamBtn.disabled = false;
+
+      setStatus("Camera ready", true);
+    }
+
+    function stopCamera() {
+      if (!stream) return;
+      for (const track of stream.getTracks()) track.stop();
+      stream = null;
+      video.srcObject = null;
+
+      stopScanning();
+
+      scanOnceBtn.disabled = true;
+      startScanBtn.disabled = true;
+      stopCamBtn.disabled = true;
+
+      setStatus("Camera stopped");
+    }
+
+    function captureFrame() {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) return null;
+
+      canvas.width = w;
+      canvas.height = h;
+
+      ctx.drawImage(video, 0, 0, w, h);
+      return canvas;
+    }
+
+    async function ocrOnce() {
+      if (!stream) { setStatus("Start camera first"); return; }
+      if (busy) return;
+
+      const { a, b } = parseLists();
+      if (a.length === 0) { setStatus("List A is empty"); return; }
+      if (b.length < a.length) { setStatus("List B has fewer lines than List A"); return; }
+
+      busy = true;
+      const t0 = performance.now();
+      setStatus("OCR running...");
+
+      try {
+        const frame = captureFrame();
+        if (!frame) throw new Error("No video frame");
+
+        const { data } = await Tesseract.recognize(frame, "eng", { logger: () => {} });
+        const raw = data?.text || "";
+        const textNorm = normalize(raw);
+        ocrTextEl.textContent = textNorm || "-";
+
+        const minScore = Number(minScoreEl.value || 0.85);
+
+        let bestIdx = -1;
+        let bestScore = 0;
+
+        for (let i = 0; i < a.length; i++) {
+          const s = scoreMatch(a[i], textNorm);
+          if (s > bestScore) { bestScore = s; bestIdx = i; }
+          if (s === 1) break;
+        }
+
+        if (bestIdx >= 0 && bestScore >= minScore) {
+          matchedAEl.textContent = a[bestIdx];
+          returnedBEl.textContent = b[bestIdx] ?? "";
+          confidenceEl.textContent = bestScore.toFixed(2);
+          setStatus("Match found", true);
+        } else {
+          matchedAEl.textContent = "-";
+          returnedBEl.textContent = "-";
+          confidenceEl.textContent = bestScore ? bestScore.toFixed(2) : "-";
+          setStatus("No match");
+        }
+      } catch (e) {
+        setStatus("OCR error: " + (e?.message || String(e)));
+      } finally {
+        const t1 = performance.now();
+        lastTimeEl.textContent = Math.round(t1 - t0) + " ms";
+        busy = false;
+      }
+    }
+
+    function startScanning() {
+      if (!stream) { setStatus("Start camera first"); return; }
+      if (timer) return;
+
+      const ms = Math.max(300, Number(intervalMsEl.value || 1200));
+      setStatus("Scanning...", true);
+
+      startScanBtn.disabled = true;
+      stopScanBtn.disabled = false;
+
+      timer = setInterval(() => { if (!busy) ocrOnce(); }, ms);
+    }
+
+    function stopScanning() {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+
+      startScanBtn.disabled = !stream;
+      stopScanBtn.disabled = true;
+
+      setStatus("Scan stopped");
+    }
+
+    startCamBtn.addEventListener("click", async () => {
+      try { await startCamera(); }
+      catch (e) { setStatus("Camera error: " + (e?.message || String(e))); }
+    });
+    stopCamBtn.addEventListener("click", stopCamera);
+    scanOnceBtn.addEventListener("click", ocrOnce);
+    startScanBtn.addEventListener("click", startScanning);
+    stopScanBtn.addEventListener("click", stopScanning);
+  </script>
+</body>
+</html>
