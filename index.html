@@ -3,455 +3,299 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Camera Mapper</title>
+  <title>IT Code Mapper</title>
   <style>
-    body { font-family: system-ui, Arial; margin: 16px; background: #f7f7f7; color: #111; }
-    .wrap { max-width: 1400px; margin: 0 auto; }
-    .top { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; }
-    .title h1 { margin:0; font-size: 22px; }
-    .muted { color:#555; font-size: 13px; }
-    .banner { border:1px solid #ddd; background:#fff; border-radius:14px; padding:10px 12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-    .ok { color:#0a7; font-weight:600; }
-    .warn { color:#b60; font-weight:600; }
-    .err { color:#c00; font-weight:600; }
+    :root { --primary: #111; --success: #0a7; --bg: #f4f4f7; }
+    body { font-family: system-ui, -apple-system, Arial; margin: 0; background: var(--bg); color: #111; line-height: 1.5; }
+    .wrap { max-width: 800px; margin: 0 auto; padding: 16px; }
+    
+    /* Hero Output Area */
+    .bigOut { border-radius: 20px; padding: 30px 20px; text-align: center; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); margin-bottom: 20px; position: sticky; top: 10px; z-index: 10; }
+    .bigGood { background: var(--success); color: #fff; box-shadow: 0 8px 24px rgba(0,160,110,0.4); transform: scale(1.02); }
+    .bigIdle { background: #fff; color: #333; border: 1px solid #ddd; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .bigLabel { font-size: 13px; opacity: 0.8; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; }
+    .bigValue { margin-top: 10px; font-size: 48px; font-weight: 850; line-height: 1; word-break: break-all; }
+    
+    /* Main Grid */
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+    .video-wrap { position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4/3; }
+    video { width: 100%; height: 100%; object-fit: cover; }
+    .roiBox { border: 2px dashed rgba(255,255,255,0.5); position: absolute; inset: 20% 15%; border-radius: 12px; pointer-events: none; }
+    
+    /* List Layout */
+    .list-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    textarea { width: 100%; border: 1px solid #ccc; border-radius: 10px; padding: 10px; font-family: monospace; font-size: 12px; box-sizing: border-box; background: #fafafa; }
+    
+    /* Interface Elements */
+    .status-bar { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 10px; color: #666; padding: 0 4px; }
+    .btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+    button { padding: 12px 18px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-weight: 600; font-size: 14px; }
+    button.primary { background: var(--primary); color: #fff; border: none; }
+    .btn-sync { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; font-size: 11px; padding: 4px 8px; }
 
-    .grid { display:grid; gap:12px; grid-template-columns: 1fr; margin-top:12px; }
-    @media (min-width: 1200px) { .grid { grid-template-columns: 5fr 4fr 3fr; } }
-
-    .card { background:#fff; border:1px solid #ddd; border-radius:16px; padding:12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    button { padding: 10px 12px; border-radius: 12px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-    button.primary { background: #111; color: #fff; border-color:#111; }
-    button:disabled { opacity:.5; cursor:not-allowed; }
-
-    video { width:100%; background:#111; border-radius: 14px; }
-    canvas { display:none; }
-    textarea { width:100%; border:1px solid #ccc; border-radius:14px; padding:10px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
-    .small { font-size: 12px; color:#666; }
-
-    .bigOut { border-radius:18px; padding:16px; }
-    .bigGood { background:#0a7; color:#fff; }
-    .bigIdle { background:#e5e5e5; color:#333; }
-    .bigLabel { font-size: 12px; opacity:.9; }
-    .bigValue { margin-top:8px; font-size: 38px; font-weight: 700; line-height: 1.1; word-break: break-word; }
-    .chips { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
-    .chip { background: rgba(0,0,0,.12); padding: 6px 10px; border-radius: 999px; font-size: 13px; }
-
-    .inputs { display:grid; gap:10px; }
-    input[type="number"], input[type="range"], select {
-      padding:8px; border-radius:12px; border:1px solid #ccc;
-    }
-    pre { white-space: pre-wrap; word-break: break-word; background:#fafafa; border:1px solid #ddd; border-radius:14px; padding:10px; font-size: 12px; }
-    .roiBox { border:2px dashed rgba(255,255,255,.55); position:absolute; inset: 18% 12%; border-radius: 12px; pointer-events:none; }
-    .videoWrap { position: relative; }
+    /* Settings Area */
+    details { margin-top: 30px; padding-bottom: 50px; }
+    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; background: #eee; padding: 15px; border-radius: 12px; }
+    label { font-size: 11px; font-weight: 700; color: #555; display: block; margin-bottom: 4px; }
+    canvas { display: none; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="top">
-      <div class="title">
-        <h1>Camera Mapper</h1>
-        <div class="muted">Horizontal layout. Big output. List A line N maps to List B line N.</div>
-      </div>
-      <div class="row">
-        <button class="primary" id="startCam">Start camera</button>
-        <button id="scanOnce" disabled>Scan</button>
-        <button id="autoOn" disabled>Auto</button>
-        <button id="autoOff" disabled>Stop</button>
-        <button id="stopCam" disabled>Close camera</button>
-      </div>
+
+<div class="wrap">
+  <div class="status-bar">
+    <div>Status: <span id="status">Initializing...</span></div>
+    <div>Latency: <span id="lastMs">0ms</span></div>
+  </div>
+
+  <div id="bigOut" class="bigOut bigIdle">
+    <div class="bigLabel">Internal System Code</div>
+    <div id="returnedB" class="bigValue">READY</div>
+    <div id="matchDetails" style="margin-top:12px; font-size: 14px; display: none;">
+      Matched: <strong id="matchedA"></strong>
     </div>
+  </div>
 
-    <div class="banner" style="margin-top:12px;">
-      <div>Status: <span id="status" class="warn">Idle</span></div>
-      <div class="small">Last scan: <span id="lastMs">-</span></div>
+  <div class="card">
+    <div class="video-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="roiBox"></div>
     </div>
+    <div class="btn-row">
+      <button class="primary" id="scanBtn">Manual Scan</button>
+      <button id="toggleAuto">Stop Auto</button>
+    </div>
+  </div>
 
-    <div class="grid">
-      <!-- Camera -->
-      <div class="card">
-        <div class="row" style="justify-content:space-between; align-items:flex-end;">
-          <div style="font-weight:700;">Camera</div>
-          <div class="row">
-            <label class="small">Mode
-              <select id="mode">
-                <option value="ocr">OCR</option>
-                <option value="barcode">BarcodeDetector (if supported)</option>
-              </select>
-            </label>
-            <label class="small">Interval (ms)
-              <input id="intervalMs" type="number" min="300" step="100" value="900" />
-            </label>
-            <label class="small">Min score
-              <input id="minScore" type="number" min="0" max="1" step="0.01" value="0.85" />
-            </label>
-          </div>
-        </div>
-
-        <div class="videoWrap" style="margin-top:10px;">
-          <video id="video" autoplay playsinline muted></video>
-          <div id="roiOverlay" class="roiBox" style="display:none;"></div>
-        </div>
-
-        <canvas id="canvas"></canvas>
-
-        <div class="inputs" style="margin-top:10px;">
-          <label class="small">
-            Use ROI crop (improves OCR a lot)
-            <select id="useRoi">
-              <option value="yes" selected>Yes</option>
-              <option value="no">No</option>
-            </select>
-          </label>
-
-          <label class="small">
-            Contrast boost (OCR)
-            <input id="contrast" type="range" min="0" max="60" value="25" />
-          </label>
-
-          <div class="small">
-            Tips: Make text big in frame. Use ROI. Avoid motion blur. Bright, even light.
-          </div>
-        </div>
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="font-weight:700;">Mapping Lists</div>
+      <div style="display:flex; gap:5px;">
+        <button class="btn-sync" id="syncCsv">Sync from CSV</button>
+        <button class="btn-sync" onclick="el('fileIn').click()">Upload</button>
       </div>
-
-      <!-- Output -->
-      <div class="card">
-        <div style="font-weight:700;">Output</div>
-
-        <div id="bigOut" class="bigOut bigIdle" style="margin-top:10px;">
-          <div class="bigLabel">Returned value</div>
-          <div id="returnedB" class="bigValue">-</div>
-          <div class="chips">
-            <div class="chip">Matched: <span id="matchedA">-</span></div>
-            <div class="chip">Score: <span id="confidence">-</span></div>
-            <div class="chip">Busy: <span id="busy">No</span></div>
-          </div>
-        </div>
-
-        <details style="margin-top:12px;">
-          <summary style="cursor:pointer; font-weight:700;">Last read text</summary>
-          <pre id="ocrText">-</pre>
-        </details>
+      <input type="file" id="fileIn" accept=".csv" style="display:none">
+    </div>
+    <div class="list-grid">
+      <div>
+        <label>External Vendor Code</label>
+        <textarea id="listA" rows="8" placeholder="List A"></textarea>
       </div>
-
-      <!-- Lists -->
-      <div class="card">
-        <div style="font-weight:700;">Lists</div>
-        <div class="small" style="margin-top:6px;">Line positions must match.</div>
-
-        <div style="margin-top:10px;">
-          <div class="small" style="font-weight:700;">List A (find)</div>
-          <textarea id="listA" rows="7">ABC123
-Invoice Total
-Widget Pro</textarea>
-        </div>
-
-        <div style="margin-top:10px;">
-          <div class="small" style="font-weight:700;">List B (return)</div>
-          <textarea id="listB" rows="7">Mapped value for ABC123
-Mapped value for Invoice Total
-Mapped value for Widget Pro</textarea>
-        </div>
-
-        <div class="small" style="margin-top:10px;">
-          If your inputs are codes, consider switching Mode to BarcodeDetector and using QR codes.
-        </div>
+      <div>
+        <label>Our System Code</label>
+        <textarea id="listB" rows="8" placeholder="List B"></textarea>
       </div>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script>
-    const el = (id) => document.getElementById(id);
+  <details>
+    <summary style="text-align:center; color:#888; cursor:pointer; font-size:13px;">Power User Settings</summary>
+    <div class="settings-grid">
+      <div>
+        <label>Scan Mode</label>
+        <select id="mode" style="width:100%; padding:8px; border-radius:5px;">
+          <option value="ocr">OCR (Text)</option>
+          <option value="barcode">Barcode Detector</option>
+        </select>
+      </div>
+      <div>
+        <label>Scan Interval (ms)</label>
+        <input id="interval" type="number" value="1000" style="width:100%; padding:8px; box-sizing:border-box;">
+      </div>
+      <div>
+        <label>Min Match Score (0.1 - 1.0)</label>
+        <input id="minScore" type="number" value="0.8" step="0.1" style="width:100%; padding:8px; box-sizing:border-box;">
+      </div>
+      <div>
+        <label>OCR Contrast</label>
+        <input id="contrast" type="range" min="0" max="60" value="25" style="width:100%;">
+      </div>
+    </div>
+    <pre id="debugLog" style="font-size:10px; background:#333; color:#0f0; padding:10px; margin-top:10px; border-radius:8px; overflow:auto; max-height:100px;">Debug info...</pre>
+  </details>
+</div>
 
-    const video = el("video");
-    const canvas = el("canvas");
-    const ctx = canvas.getContext("2d");
+<canvas id="canvas"></canvas>
 
-    const startCamBtn = el("startCam");
-    const stopCamBtn = el("stopCam");
-    const scanOnceBtn = el("scanOnce");
-    const autoOnBtn = el("autoOn");
-    const autoOffBtn = el("autoOff");
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+  const el = (id) => document.getElementById(id);
+  const video = el("video");
+  const canvas = el("canvas");
+  const ctx = canvas.getContext("2d");
 
-    const statusEl = el("status");
-    const lastMsEl = el("lastMs");
+  let stream = null;
+  let timer = null;
+  let isBusy = false;
+  let autoRunning = true;
 
-    const matchedAEl = el("matchedA");
-    const returnedBEl = el("returnedB");
-    const confidenceEl = el("confidence");
-    const ocrTextEl = el("ocrText");
-    const bigOut = el("bigOut");
-    const busyEl = el("busy");
-
-    const intervalMsEl = el("intervalMs");
-    const minScoreEl = el("minScore");
-    const listAEl = el("listA");
-    const listBEl = el("listB");
-    const useRoiEl = el("useRoi");
-    const roiOverlay = el("roiOverlay");
-    const contrastEl = el("contrast");
-    const modeEl = el("mode");
-
-    let stream = null;
-    let timer = null;
-    let busy = false;
-
-    function setBusy(v) {
-      busy = v;
-      busyEl.textContent = v ? "Yes" : "No";
-    }
-
-    function setStatus(text, tone) {
-      statusEl.textContent = text;
-      statusEl.className = tone || "warn";
-    }
-
-    function normalize(s) {
-      return (s || "")
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .replace(/[^\p{L}\p{N}\s]/gu, "")
-        .trim();
-    }
-
-    function parseLists() {
-      const a = listAEl.value.split("\n").map(x => x.trim()).filter(Boolean);
-      const b = listBEl.value.split("\n").map(x => x.trim());
-      return { a, b };
-    }
-
-    function scoreMatch(target, textNorm) {
-      const t = normalize(target);
-      if (!t) return 0;
-      if (textNorm.includes(t)) return 1;
-
-      const tTokens = new Set(t.split(" ").filter(Boolean));
-      const xTokens = new Set(textNorm.split(" ").filter(Boolean));
-      if (tTokens.size === 0) return 0;
-
-      let hit = 0;
-      for (const tok of tTokens) if (xTokens.has(tok)) hit++;
-      return hit / tTokens.size;
-    }
-
-    function paintOutput(matchedA, returnedB, score) {
-      matchedAEl.textContent = matchedA || "-";
-      returnedBEl.textContent = returnedB || "-";
-      confidenceEl.textContent = (score === null || score === undefined) ? "-" : score.toFixed(2);
-
-      const good = returnedB && returnedB !== "-";
-      bigOut.className = "bigOut " + (good ? "bigGood" : "bigIdle");
-    }
-
-    async function startCamera() {
-      if (stream) return;
-
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setStatus("Camera not supported in this browser", "err");
-        return;
+  // --- 1. Data Loading & CSV Support ---
+  
+  async function fetchMapping() {
+    el("status").textContent = "Fetching CSV...";
+    try {
+      const resp = await fetch('mapping.csv?nocache=' + Date.now());
+      if (resp.ok) {
+        const text = await resp.text();
+        parseAndStore(text);
+        el("status").innerHTML = "<span style='color:green'>CSV Synced</span>";
+      } else {
+        el("status").textContent = "No mapping.csv found";
       }
+    } catch (e) {
+      el("status").textContent = "Sync failed";
+    }
+  }
 
-      setStatus("Requesting camera permission...", "warn");
+  function parseAndStore(csv) {
+    const lines = csv.split(/\r?\n/).filter(l => l.trim().includes(','));
+    const a = [], b = [];
+    lines.forEach(line => {
+      const parts = line.split(',');
+      a.push(parts[0].trim());
+      b.push(parts[1].trim());
+    });
+    el("listA").value = a.join('\n');
+    el("listB").value = b.join('\n');
+    saveToLocal();
+  }
 
+  function saveToLocal() {
+    localStorage.setItem('mapA', el("listA").value);
+    localStorage.setItem('mapB', el("listB").value);
+  }
+
+  // --- 2. Camera & OCR Logic ---
+
+  async function init() {
+    // Load local storage first
+    if (localStorage.getItem('mapA')) {
+      el("listA").value = localStorage.getItem('mapA');
+      el("listB").value = localStorage.getItem('mapB');
+    } else {
+      await fetchMapping();
+    }
+
+    try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false
+        video: { facingMode: "environment", width: { ideal: 1280 } }
       });
-
       video.srcObject = stream;
-      await new Promise(resolve => (video.onloadedmetadata = resolve));
-
-      scanOnceBtn.disabled = false;
-      autoOnBtn.disabled = false;
-      stopCamBtn.disabled = false;
-
-      setStatus("Camera ready", "ok");
+      el("status").textContent = "Camera Ready";
+      startAuto();
+    } catch (err) {
+      el("status").innerHTML = "<span style='color:red'>Camera Denied</span>";
     }
+  }
 
-    function stopScanning() {
-      if (!timer) return;
-      clearInterval(timer);
-      timer = null;
-      autoOnBtn.disabled = !stream;
-      autoOffBtn.disabled = true;
-      setStatus("Scan stopped", "warn");
-    }
+  async function scan() {
+    if (isBusy || !stream) return;
+    isBusy = true;
+    const tStart = performance.now();
 
-    function stopCamera() {
-      if (!stream) return;
-      stopScanning();
-      for (const t of stream.getTracks()) t.stop();
-      stream = null;
-      video.srcObject = null;
-
-      scanOnceBtn.disabled = true;
-      autoOnBtn.disabled = true;
-      autoOffBtn.disabled = true;
-      stopCamBtn.disabled = true;
-
-      setStatus("Camera stopped", "warn");
-    }
-
-    function captureToCanvas() {
+    try {
       const w = video.videoWidth;
       const h = video.videoHeight;
-      if (!w || !h) return null;
+      canvas.width = w; canvas.height = h;
 
-      canvas.width = w;
-      canvas.height = h;
-
-      const useRoi = useRoiEl.value === "yes";
-      roiOverlay.style.display = useRoi ? "block" : "none";
-
-      if (!useRoi) {
-        ctx.drawImage(video, 0, 0, w, h);
-        return { canvas, roi: null };
-      }
-
-      // ROI: center-ish box matching overlay: inset 18% top/bottom, 12% left/right
-      const sx = Math.round(w * 0.12);
-      const sy = Math.round(h * 0.18);
-      const sw = Math.round(w * 0.76);
-      const sh = Math.round(h * 0.64);
-
-      // Draw cropped ROI scaled to full canvas (improves OCR)
+      // ROI Logic (The center box)
+      const sx = w * 0.15, sy = h * 0.2, sw = w * 0.7, sh = h * 0.6;
       ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
-      return { canvas, roi: { sx, sy, sw, sh } };
-    }
 
-    function preprocessImage() {
-      // Basic grayscale + contrast boost
-      const w = canvas.width, h = canvas.height;
-      const img = ctx.getImageData(0, 0, w, h);
-      const d = img.data;
-      const boost = Number(contrastEl.value || 0); // 0..60
-
-      // Contrast formula: shift away from mid point (128)
-      for (let i = 0; i < d.length; i += 4) {
-        const r = d[i], g = d[i + 1], b = d[i + 2];
-        let y = (0.299 * r + 0.587 * g + 0.114 * b);
-
-        // contrast boost
-        y = (y - 128) * (1 + boost / 50) + 128;
-
-        // clamp
-        y = Math.max(0, Math.min(255, y));
-        d[i] = d[i + 1] = d[i + 2] = y;
-      }
-      ctx.putImageData(img, 0, 0);
-    }
-
-    async function scanBarcodeOnce() {
-      if (!("BarcodeDetector" in window)) {
-        setStatus("BarcodeDetector not supported here. Use OCR mode.", "err");
-        return { textNorm: "", raw: "" };
+      // Pre-process (Contrast boost)
+      if (el("mode").value === "ocr") {
+        const img = ctx.getImageData(0,0,w,h);
+        const d = img.data;
+        const contrast = (Number(el("contrast").value) + 100) / 100;
+        for (let i=0; i<d.length; i+=4) {
+          for (let j=0; j<3; j++) d[i+j] = ((d[i+j] / 255 - 0.5) * contrast + 0.5) * 255;
+        }
+        ctx.putImageData(img, 0, 0);
       }
 
-      const detector = new BarcodeDetector({
-        formats: ["qr_code", "code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e", "itf"]
-      });
-
-      const { canvas: c } = captureToCanvas() || {};
-      if (!c) throw new Error("No video frame");
-      // Barcode detection prefers unmodified frames, so do not preprocess.
-
-      const barcodes = await detector.detect(c);
-      if (!barcodes || barcodes.length === 0) return { textNorm: "", raw: "" };
-
-      // Use first barcode value
-      const raw = String(barcodes[0].rawValue || "");
-      return { raw, textNorm: normalize(raw) };
-    }
-
-    async function scanOcrOnce() {
-      const { canvas: c } = captureToCanvas() || {};
-      if (!c) throw new Error("No video frame");
-
-      preprocessImage();
-
-      const { data } = await Tesseract.recognize(c, "eng", {
-        logger: () => {},
-        // You can uncomment these for some cases:
-        // tessedit_pageseg_mode: 6, // assume a block of text
-      });
-
-      const raw = data?.text || "";
-      return { raw, textNorm: normalize(raw) };
-    }
-
-    async function scanOnce() {
-      if (!stream) { setStatus("Start the camera first", "warn"); return; }
-      if (busy) return;
-
-      const { a, b } = parseLists();
-      if (a.length === 0) { setStatus("List A is empty", "warn"); return; }
-      if (b.length < a.length) { setStatus("List B has fewer lines than List A", "warn"); return; }
-
-      setBusy(true);
-      setStatus("Scanning...", "warn");
-      const t0 = performance.now();
-
-      try {
-        let res;
-        if (modeEl.value === "barcode") {
-          res = await scanBarcodeOnce();
-        } else {
-          res = await scanOcrOnce();
-        }
-
-        ocrTextEl.textContent = res.textNorm || "-";
-
-        const minScore = Math.max(0, Math.min(1, Number(minScoreEl.value || 0.85)));
-
-        let bestIdx = -1;
-        let bestScore = 0;
-
-        for (let i = 0; i < a.length; i++) {
-          const s = scoreMatch(a[i], res.textNorm);
-          if (s > bestScore) { bestScore = s; bestIdx = i; }
-          if (s === 1) break;
-        }
-
-        if (bestIdx >= 0 && bestScore >= minScore) {
-          paintOutput(a[bestIdx], b[bestIdx] ?? "", bestScore);
-          setStatus("Match found", "ok");
-        } else {
-          paintOutput("-", "-", bestScore || null);
-          setStatus("No match", "warn");
-        }
-      } catch (e) {
-        setStatus("Scan error: " + (e?.message || String(e)), "err");
-      } finally {
-        const t1 = performance.now();
-        lastMsEl.textContent = Math.round(t1 - t0) + " ms";
-        setBusy(false);
+      let text = "";
+      if (el("mode").value === "barcode" && "BarcodeDetector" in window) {
+        const detector = new BarcodeDetector();
+        const found = await detector.detect(canvas);
+        text = found[0]?.rawValue || "";
+      } else {
+        const { data } = await Tesseract.recognize(canvas, 'eng');
+        text = data.text;
       }
+
+      el("debugLog").textContent = "Last Read: " + text.replace(/\n/g, ' ');
+
+      // Matching
+      const cleanRead = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const listA = el("listA").value.split('\n').map(x => x.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+      const listB = el("listB").value.split('\n').map(x => x.trim());
+      
+      let foundIdx = -1;
+      if (cleanRead.length > 1) {
+        foundIdx = listA.findIndex(item => item && cleanRead.includes(item));
+      }
+
+      if (foundIdx > -1) {
+        handleSuccess(listB[foundIdx], el("listA").value.split('\n')[foundIdx]);
+      } else {
+        el("returnedB").textContent = "SCANNING...";
+        el("bigOut").className = "bigOut bigIdle";
+        el("matchDetails").style.display = "none";
+      }
+
+    } catch (e) {
+      console.error(e);
+    } finally {
+      el("lastMs").textContent = Math.round(performance.now() - tStart) + "ms";
+      isBusy = false;
     }
+  }
 
-    function startAuto() {
-      if (!stream) { setStatus("Start the camera first", "warn"); return; }
-      if (timer) return;
-      const ms = Math.max(300, Number(intervalMsEl.value || 900));
-      autoOnBtn.disabled = true;
-      autoOffBtn.disabled = false;
-      setStatus("Auto scanning...", "ok");
-      timer = setInterval(() => { if (!busy) scanOnce(); }, ms);
+  function handleSuccess(myCode, theirCode) {
+    el("returnedB").textContent = myCode;
+    el("matchedA").textContent = theirCode;
+    el("matchDetails").style.display = "block";
+    el("bigOut").className = "bigOut bigGood";
+
+    // Success Freeze: Stop scanning for 2.5 seconds to avoid jumping
+    if (autoRunning) {
+      stopAuto(true); 
+      setTimeout(() => { if(autoRunning) startAuto(); }, 2500);
     }
+  }
 
-    startCamBtn.addEventListener("click", async () => {
-      try { await startCamera(); }
-      catch (e) { setStatus("Camera error: " + (e?.message || String(e)), "err"); }
-    });
-    stopCamBtn.addEventListener("click", stopCamera);
-    scanOnceBtn.addEventListener("click", scanOnce);
-    autoOnBtn.addEventListener("click", startAuto);
-    autoOffBtn.addEventListener("click", stopScanning);
+  function startAuto() {
+    if (timer) clearInterval(timer);
+    autoRunning = true;
+    el("toggleAuto").textContent = "Stop Auto";
+    timer = setInterval(scan, el("interval").value);
+  }
 
-    // Reset output when lists change (optional)
-    listAEl.addEventListener("input", () => paintOutput("-", "-", null));
-    listBEl.addEventListener("input", () => paintOutput("-", "-", null));
-  </script>
+  function stopAuto(isTemporary = false) {
+    clearInterval(timer);
+    timer = null;
+    if (!isTemporary) {
+      autoRunning = false;
+      el("toggleAuto").textContent = "Start Auto";
+    }
+  }
+
+  // --- 3. Listeners ---
+
+  el("toggleAuto").addEventListener("click", () => autoRunning ? stopAuto() : startAuto());
+  el("scanBtn").addEventListener("click", scan);
+  el("syncCsv").addEventListener("click", fetchMapping);
+  
+  el("fileIn").addEventListener("change", (e) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => parseAndStore(ev.target.result);
+    reader.readAsText(e.target.files[0]);
+  });
+
+  [el("listA"), el("listB")].forEach(t => t.addEventListener("input", saveToLocal));
+
+  // Boot
+  window.addEventListener("load", init);
+</script>
 </body>
 </html>
