@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Pocket Scanner</title>
+  <title>Pocket Scanner v2</title>
   <style>
     :root { --primary: #222; --success: #0a7; --bg: #f0f2f5; --card-bg: #fff; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background: var(--bg); color: #333; overscroll-behavior: none; }
@@ -33,10 +33,10 @@
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       min-width: 100%; min-height: 100%; width: auto; height: auto; object-fit: cover;
     }
-    /* Visual Guide - purely cosmetic, matches JS crop */
+    /* Visual Guide */
     .scan-guide {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 80%; height: 60px; /* FIXED PIXEL HEIGHT to match the "Slit Scan" logic */
+      width: 80%; height: 60px;
       border: 2px solid rgba(255,255,255,0.9); border-radius: 8px;
       box-shadow: 0 0 0 999px rgba(0,0,0,0.6); pointer-events: none;
     }
@@ -59,7 +59,7 @@
     .settings-grid label { font-size: 11px; display: block; margin-bottom: 4px; color: #666; font-weight: 600; }
     input, select { width: 100%; box-sizing: border-box; padding: 8px; border-radius: 6px; border: 1px solid #ddd; background: #fff; }
 
-    /* Debug View (Hidden by default) */
+    /* Debug View */
     #canvas { width: 100%; border: 2px solid red; display: none; margin-top: 10px; }
     .show-debug #canvas { display: block; }
   </style>
@@ -68,7 +68,7 @@
 
 <div class="wrap">
   <div class="top-bar">
-    <span id="status">Starting...</span>
+    <span id="status">Loading Config...</span>
     <span id="latency">- ms</span>
   </div>
 
@@ -105,9 +105,10 @@
     <summary>Camera Settings</summary>
     <div class="settings-grid">
       <div><label>Mode</label><select id="mode"><option value="ocr">Text (OCR)</option><option value="barcode">Barcode/QR</option></select></div>
-      <div><label>Scan Interval (ms)</label><input type="number" id="interval" value="800"></div>
-      <div><label>Contrast</label><input type="range" id="contrast" min="0" max="50" value="25"></div>
-      <div style="display:flex; align-items:center;">
+      <div><label>Scan Interval (ms)</label><input type="number" id="interval"></div>
+      <div><label>Contrast (0-50)</label><input type="range" id="contrast" min="0" max="50"></div>
+      <div><label>Lock Time (ms)</label><input type="number" id="lockTime"></div>
+      <div style="display:flex; align-items:center; grid-column: span 2;">
         <label style="margin:0;"><input type="checkbox" id="debugCheck"> Show What Computer Sees</label>
       </div>
     </div>
@@ -127,16 +128,34 @@
   let timer = null;
   let busy = false;
   let auto = true;
+  
+  // Configuration Store (Defaults)
+  let config = {
+    scanIntervalMs: 800,
+    successLockMs: 2500,
+    defaultContrast: 25,
+    minMatchScore: 0.8,
+    defaultMode: 'ocr',
+    cameraFacing: 'environment',
+    debugView: false
+  };
 
   async function init() {
+    // 1. Load Settings from JSON
+    await loadSettings();
+
+    // 2. Load Mapping Data
     if(localStorage.getItem('mapA')) {
       el('listA').value = localStorage.getItem('mapA');
       el('listB').value = localStorage.getItem('mapB');
-    } else { await fetchMapping(); }
+    } else { 
+      await fetchMapping(); 
+    }
 
+    // 3. Start Camera
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 } }
+        video: { facingMode: config.cameraFacing, width: { ideal: 1280 } }
       });
       video.srcObject = stream;
       el('status').innerHTML = "Camera Active";
@@ -144,9 +163,32 @@
     } catch(e) { el('status').innerHTML = "Camera Error"; }
   }
 
+  async function loadSettings() {
+    try {
+      const res = await fetch('settings.json?t=' + Date.now());
+      if (res.ok) {
+        const json = await res.json();
+        config = { ...config, ...json }; // Merge file settings over defaults
+        console.log("Settings loaded:", config);
+      } else {
+        console.log("settings.json not found, using defaults");
+      }
+    } catch (e) { console.error("Error loading settings", e); }
+
+    // Apply config to UI
+    el('interval').value = config.scanIntervalMs;
+    el('lockTime').value = config.successLockMs;
+    el('contrast').value = config.defaultContrast;
+    el('mode').value = config.defaultMode;
+    if(config.debugView) {
+      el('debugCheck').checked = true;
+      document.body.classList.add('show-debug');
+    }
+  }
+
   async function fetchMapping() {
     try {
-      el('status').textContent = "Syncing...";
+      el('status').textContent = "Syncing CSV...";
       const r = await fetch('mapping.csv?t='+Date.now());
       if(r.ok) parseCSV(await r.text());
       el('status').textContent = "Synced";
@@ -171,7 +213,7 @@
     localStorage.setItem('mapB', el('listB').value);
   }
 
-  // Toggle Debug View
+  // Toggle Debug
   el('debugCheck').onchange = (e) => {
     if(e.target.checked) document.body.classList.add('show-debug');
     else document.body.classList.remove('show-debug');
@@ -182,43 +224,39 @@
     busy = true;
     const t0 = performance.now();
 
+    // Use UI values for real-time tweaking, or fallback to config
+    const currentMode = el('mode').value;
+    const currentContrast = Number(el('contrast').value);
+
     try {
       const w = video.videoWidth;
       const h = video.videoHeight;
       if(!w || !h) return;
 
-      // --- TIGHT CROP LOGIC ---
-      // We want to scan only the center horizontal strip.
-      // Width: 70% of screen (safe margins)
-      // Height: 15% of screen (very narrow strip)
-      
+      // SLIT SCAN CROP (Center Horizontal Strip)
       const sw = w * 0.7; 
       const sh = h * 0.15; 
       const sx = (w - sw) / 2;
       const sy = (h - sh) / 2;
 
-      // Resize canvas to match the crop (improves performance significantly)
       canvas.width = sw;
       canvas.height = sh;
-
       ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
-      if(el('mode').value === 'ocr') {
+      if(currentMode === 'ocr') {
         const img = ctx.getImageData(0,0,sw,sh);
         const d = img.data;
-        const boost = (Number(el('contrast').value) + 100) / 100;
+        const boost = (currentContrast + 100) / 100;
         for(let i=0; i<d.length; i+=4) {
           let v = (d[i]*0.3 + d[i+1]*0.59 + d[i+2]*0.11);
           v = (v - 128) * boost + 128;
-          // Thresholding (make it strictly black and white for clearer text)
-          // v = v > 140 ? 255 : 0; // Optional: hard threshold
           d[i] = d[i+1] = d[i+2] = v > 255 ? 255 : (v < 0 ? 0 : v);
         }
         ctx.putImageData(img, 0, 0);
       }
 
       let text = "";
-      if(el('mode').value === 'barcode' && window.BarcodeDetector) {
+      if(currentMode === 'barcode' && window.BarcodeDetector) {
         const bd = new BarcodeDetector();
         const bcs = await bd.detect(canvas);
         text = bcs[0]?.rawValue || "";
@@ -241,7 +279,6 @@
            el('outputMeta').style.display = "none";
         }
       }
-
     } catch(e) { console.error(e); }
     
     el('latency').textContent = Math.round(performance.now() - t0) + "ms";
@@ -253,15 +290,21 @@
     el('outputKey').textContent = key;
     el('outputMeta').style.display = "block";
     el('resultCard').className = "result-card success";
+    
+    // Configurable Lock Time
+    const lockDuration = Number(el('lockTime').value) || config.successLockMs;
+
     if(auto) {
       clearInterval(timer);
-      setTimeout(() => { if(auto) startAuto(); }, 2500);
+      setTimeout(() => { if(auto) startAuto(); }, lockDuration);
     }
   }
 
   function startAuto() {
     if(timer) clearInterval(timer);
-    timer = setInterval(scan, el('interval').value);
+    // Configurable Interval
+    const interval = Number(el('interval').value) || config.scanIntervalMs;
+    timer = setInterval(scan, interval);
     auto = true;
     el('btnAuto').textContent = "Stop Auto";
   }
