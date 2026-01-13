@@ -1,0 +1,9 @@
+{
+  "scanIntervalMs": 500,
+  "successLockMs": 5000,
+  "defaultContrast": 25,
+  "minMatchScore": 0.8,
+  "defaultMode": "ocr",
+  "cameraFacing": "environment",
+  "debugView": false
+}
