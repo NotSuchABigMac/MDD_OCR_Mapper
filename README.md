@@ -1,6 +1,4 @@
-Here is a professional, ready-to-use README.md for your project. It is written to be helpful for both your IT team (who configure it) and the end-users (who need to know how it works).
-
-Pocket Scanner
+# Pocket Scanner
 A lightweight, browser-based tool designed for warehouse and IT teams to instantly map external vendor codes (e.g., Serial Numbers on boxes) to internal system codes (e.g., Asset Tags or SKUs).
 
 It runs entirely in the browser using OCR (Optical Character Recognition) and Barcode Detection, meaning no app installation is required.
