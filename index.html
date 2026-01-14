@@ -119,7 +119,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-  const el = (id) => document.getElementById(id);
+const el = (id) => document.getElementById(id);
   const video = el('video');
   const canvas = el('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -128,10 +128,10 @@
   let timer = null;
   let busy = false;
   let auto = true;
+  let worker = null; // We will pre-load the worker
   
-  // Configuration Store (Defaults)
   let config = {
-    scanIntervalMs: 800,
+    scanIntervalMs: 1000,
     successLockMs: 2500,
     defaultContrast: 25,
     minMatchScore: 0.8,
@@ -140,27 +140,26 @@
     debugView: false
   };
 
-  async function init() {
-    // 1. Load Settings from JSON
-    await loadSettings();
-
-    // 2. Load Mapping Data
-    if(localStorage.getItem('mapA')) {
-      el('listA').value = localStorage.getItem('mapA');
-      el('listB').value = localStorage.getItem('mapB');
-    } else { 
-      await fetchMapping(); 
-    }
-
-    // 3. Start Camera
+  // --- BOOT SEQUENCE ---
+  async function boot() {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: config.cameraFacing, width: { ideal: 1280 } }
-      });
-      video.srcObject = stream;
-      el('status').innerHTML = "Camera Active";
-      startAuto();
-    } catch(e) { el('status').innerHTML = "Camera Error"; }
+      el('status').textContent = "1/3 Loading Config...";
+      await loadSettings();
+
+      el('status').textContent = "2/3 Loading Data...";
+      await loadInitialData();
+
+      el('status').textContent = "3/3 Warming Up OCR...";
+      await setupOCR();
+
+      el('status').textContent = "Starting Camera...";
+      await startCamera();
+      
+      el('status').textContent = "System Ready";
+    } catch (err) {
+      console.error("Boot failed:", err);
+      el('status').innerHTML = `<span style="color:red">Boot Error: ${err.message}</span>`;
+    }
   }
 
   async function loadSettings() {
@@ -168,72 +167,66 @@
       const res = await fetch('settings.json?t=' + Date.now());
       if (res.ok) {
         const json = await res.json();
-        config = { ...config, ...json }; // Merge file settings over defaults
-        console.log("Settings loaded:", config);
-      } else {
-        console.log("settings.json not found, using defaults");
+        config = { ...config, ...json };
       }
-    } catch (e) { console.error("Error loading settings", e); }
-
-    // Apply config to UI
+    } catch (e) { console.warn("Settings.json not found, using defaults."); }
+    
+    // Apply to UI
     el('interval').value = config.scanIntervalMs;
     el('lockTime').value = config.successLockMs;
     el('contrast').value = config.defaultContrast;
     el('mode').value = config.defaultMode;
-    if(config.debugView) {
-      el('debugCheck').checked = true;
-      document.body.classList.add('show-debug');
+    if(config.debugView) el('debugCheck').checked = true;
+  }
+
+  async function loadInitialData() {
+    const savedA = localStorage.getItem('mapA');
+    if (savedA) {
+      el('listA').value = savedA;
+      el('listB').value = localStorage.getItem('mapB');
+    } else {
+      await fetchMapping();
     }
   }
 
-  async function fetchMapping() {
-    try {
-      el('status').textContent = "Syncing CSV...";
-      const r = await fetch('mapping.csv?t='+Date.now());
-      if(r.ok) parseCSV(await r.text());
-      el('status').textContent = "Synced";
-    } catch(e) { console.log("No CSV"); }
+  async function setupOCR() {
+    // Pre-initialize Tesseract worker so the first scan is instant
+    worker = await Tesseract.createWorker('eng');
   }
 
-  function parseCSV(txt) {
-    const lines = txt.split(/\r?\n/).filter(x => x.includes(','));
-    const a=[], b=[];
-    lines.forEach(l => {
-      const p = l.split(',');
-      a.push(p[0].trim());
-      b.push(p[1].trim());
+  async function startCamera() {
+    if (stream) return;
+    const constraints = {
+      video: { 
+        facingMode: config.cameraFacing,
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    // Wait for video to actually start playing
+    return new Promise((resolve) => {
+      video.onloadedmetadata = () => {
+        startAuto();
+        resolve();
+      };
     });
-    el('listA').value = a.join('\n');
-    el('listB').value = b.join('\n');
-    saveData();
   }
 
-  function saveData() {
-    localStorage.setItem('mapA', el('listA').value);
-    localStorage.setItem('mapB', el('listB').value);
-  }
-
-  // Toggle Debug
-  el('debugCheck').onchange = (e) => {
-    if(e.target.checked) document.body.classList.add('show-debug');
-    else document.body.classList.remove('show-debug');
-  };
+  // --- SCANNING ENGINE ---
 
   async function scan() {
-    if(busy || !stream) return;
+    if (busy || !stream || !worker) return;
     busy = true;
     const t0 = performance.now();
-
-    // Use UI values for real-time tweaking, or fallback to config
-    const currentMode = el('mode').value;
-    const currentContrast = Number(el('contrast').value);
 
     try {
       const w = video.videoWidth;
       const h = video.videoHeight;
-      if(!w || !h) return;
+      if (w === 0) throw new Error("Video not ready");
 
-      // SLIT SCAN CROP (Center Horizontal Strip)
+      // Slit Scan Crop
       const sw = w * 0.7; 
       const sh = h * 0.15; 
       const sx = (w - sw) / 2;
@@ -243,46 +236,69 @@
       canvas.height = sh;
       ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
-      if(currentMode === 'ocr') {
-        const img = ctx.getImageData(0,0,sw,sh);
+      // Contrast processing
+      if (el('mode').value === 'ocr') {
+        const img = ctx.getImageData(0, 0, sw, sh);
         const d = img.data;
-        const boost = (currentContrast + 100) / 100;
-        for(let i=0; i<d.length; i+=4) {
-          let v = (d[i]*0.3 + d[i+1]*0.59 + d[i+2]*0.11);
+        const boost = (Number(el('contrast').value) + 100) / 100;
+        for (let i = 0; i < d.length; i += 4) {
+          let v = (d[i] * 0.3 + d[i+1] * 0.59 + d[i+2] * 0.11);
           v = (v - 128) * boost + 128;
           d[i] = d[i+1] = d[i+2] = v > 255 ? 255 : (v < 0 ? 0 : v);
         }
         ctx.putImageData(img, 0, 0);
       }
 
-      let text = "";
-      if(currentMode === 'barcode' && window.BarcodeDetector) {
+      let resultText = "";
+      if (el('mode').value === 'barcode' && window.BarcodeDetector) {
         const bd = new BarcodeDetector();
         const bcs = await bd.detect(canvas);
-        text = bcs[0]?.rawValue || "";
+        resultText = bcs[0]?.rawValue || "";
       } else {
-        const { data } = await Tesseract.recognize(canvas, 'eng');
-        text = data.text;
+        // Use the pre-warmed worker
+        const { data: { text } } = await worker.recognize(canvas);
+        resultText = text;
       }
 
-      const clean = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const clean = resultText.toLowerCase().replace(/[^a-z0-9]/g, '');
       const listA = el('listA').value.split('\n').map(x => x.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
       
-      const idx = listA.findIndex(val => val && clean.includes(val));
+      const idx = listA.findIndex(val => val && val.length > 1 && clean.includes(val));
 
-      if(idx > -1) {
+      if (idx > -1) {
         foundMatch(el('listB').value.split('\n')[idx], el('listA').value.split('\n')[idx]);
       } else {
-        if(!el('resultCard').classList.contains('success')) {
+        if (!el('resultCard').classList.contains('success')) {
            el('outputVal').textContent = "SCANNING";
            el('resultCard').className = "result-card";
            el('outputMeta').style.display = "none";
         }
       }
-    } catch(e) { console.error(e); }
-    
-    el('latency').textContent = Math.round(performance.now() - t0) + "ms";
-    busy = false;
+    } catch (e) {
+      console.error("Scan Error:", e);
+    } finally {
+      el('latency').textContent = Math.round(performance.now() - t0) + "ms";
+      busy = false;
+    }
+  }
+
+  // --- HELPERS ---
+
+  function startAuto() {
+    stopAuto(true);
+    auto = true;
+    const interval = parseInt(el('interval').value) || 1000;
+    timer = setInterval(scan, interval);
+    el('btnAuto').textContent = "Stop Auto";
+  }
+
+  function stopAuto(isTemp = false) {
+    if (timer) clearInterval(timer);
+    timer = null;
+    if (!isTemp) {
+      auto = false;
+      el('btnAuto').textContent = "Start Auto";
+    }
   }
 
   function foundMatch(val, key) {
@@ -291,37 +307,37 @@
     el('outputMeta').style.display = "block";
     el('resultCard').className = "result-card success";
     
-    // Configurable Lock Time
-    const lockDuration = Number(el('lockTime').value) || config.successLockMs;
-
-    if(auto) {
-      clearInterval(timer);
-      setTimeout(() => { if(auto) startAuto(); }, lockDuration);
+    if (auto) {
+      stopAuto(true);
+      const lock = parseInt(el('lockTime').value) || 2500;
+      setTimeout(() => { if (auto) startAuto(); }, lock);
     }
   }
 
-  function startAuto() {
-    if(timer) clearInterval(timer);
-    // Configurable Interval
-    const interval = Number(el('interval').value) || config.scanIntervalMs;
-    timer = setInterval(scan, interval);
-    auto = true;
-    el('btnAuto').textContent = "Stop Auto";
+  async function fetchMapping() {
+    try {
+      const r = await fetch('mapping.csv?t=' + Date.now());
+      if (r.ok) {
+        const txt = await r.text();
+        const lines = txt.split(/\r?\n/).filter(x => x.includes(','));
+        const a = [], b = [];
+        lines.forEach(l => {
+          const p = l.split(',');
+          a.push(p[0].trim());
+          b.push(p[1].trim());
+        });
+        el('listA').value = a.join('\n');
+        el('listB').value = b.join('\n');
+        localStorage.setItem('mapA', el('listA').value);
+        localStorage.setItem('mapB', el('listB').value);
+      }
+    } catch (e) { console.warn("CSV fetch failed."); }
   }
 
+  // Bind Events
+  el('btnAuto').onclick = () => auto ? stopAuto() : startAuto();
   el('btnScan').onclick = scan;
-  el('btnAuto').onclick = () => {
-    if(timer) { clearInterval(timer); timer=null; auto=false; el('btnAuto').textContent="Start Auto"; }
-    else startAuto();
-  };
-  el('fileIn').onchange = (e) => {
-    const r = new FileReader();
-    r.onload = (ev) => parseCSV(ev.target.result);
-    r.readAsText(e.target.files[0]);
-  }
-  [el('listA'), el('listB')].forEach(x => x.oninput = saveData);
-
-  window.onload = init;
+  window.onload = boot;
 </script>
 </body>
 </html>
