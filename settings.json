@@ -5,5 +5,8 @@
   "minMatchScore": 0.8,
   "defaultMode": "ocr",
   "cameraFacing": "environment",
-  "debugView": false
+  "debugView": false,
+  "tessedit_char_whitelist": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.",
+  "tessedit_pageseg_mode": "7",
+  "font_hint": "DIN 1451"
 }
