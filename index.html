@@ -3,79 +3,56 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Pocket Scanner v2</title>
+  <title>DIN 1451 Mapper</title>
+  <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/din-1451">
   <style>
-    :root { --primary: #222; --success: #0a7; --bg: #f0f2f5; --card-bg: #fff; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background: var(--bg); color: #333; overscroll-behavior: none; }
+    :root { --primary: #111; --success: #0a7; --bg: #f0f2f5; --font-din: 'DIN 1451 Std', 'DIN 1451', sans-serif; }
+    body { font-family: -apple-system, system-ui; margin: 0; background: var(--bg); overscroll-behavior: none; }
     
-    .wrap { max-width: 600px; margin: 0 auto; padding: 12px; padding-bottom: 80px; }
-    .top-bar { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-bottom: 8px; padding: 0 4px; }
-
-    /* Sticky Result Card */
+    .wrap { max-width: 600px; margin: 0 auto; padding: 12px; }
+    
+    /* Result Card styled with DIN 1451 */
     .result-card {
       position: sticky; top: 10px; z-index: 100;
-      background: var(--card-bg); border-radius: 16px; padding: 16px; text-align: center;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid rgba(0,0,0,0.05);
-      transition: all 0.2s ease; margin-bottom: 16px;
+      background: #fff; border-radius: 12px; padding: 16px; text-align: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1); border: 2px solid #ddd;
+      margin-bottom: 16px;
     }
-    .result-card.success { background: var(--success); color: white; transform: scale(1.02); box-shadow: 0 8px 25px rgba(0,160,110,0.4); }
-    .res-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8; margin-bottom: 4px; font-weight: 700; }
-    .res-value { font-size: 32px; font-weight: 800; line-height: 1.1; word-break: break-all; }
-    .res-meta { font-size: 12px; margin-top: 6px; opacity: 0.9; display: none; }
+    .result-card.success { background: var(--success); color: white; border-color: var(--success); }
+    
+    .res-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; margin-bottom: 4px; }
+    .res-value { font-family: var(--font-din); font-size: 40px; font-weight: 500; word-break: break-all; }
 
-    /* Camera Strip */
+    /* Narrow Slit Scan View */
     .cam-card {
-      background: #000; border-radius: 16px; overflow: hidden; position: relative;
-      height: 200px; /* Reduced height for tighter UI */
-      margin-bottom: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      background: #000; border-radius: 12px; overflow: hidden; position: relative;
+      height: 180px; margin-bottom: 12px;
     }
-    video {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      min-width: 100%; min-height: 100%; width: auto; height: auto; object-fit: cover;
-    }
-    /* Visual Guide */
+    video { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); min-width: 100%; min-height: 100%; object-fit: cover; }
+    
     .scan-guide {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 80%; height: 60px;
-      border: 2px solid rgba(255,255,255,0.9); border-radius: 8px;
+      width: 85%; height: 50px; border: 2px solid #fff; border-radius: 4px;
       box-shadow: 0 0 0 999px rgba(0,0,0,0.6); pointer-events: none;
     }
-    .scan-guide::after {
-      content: "ALIGN TEXT HERE";
-      position: absolute; top: -18px; left: 0; width: 100%;
-      text-align: center; color: rgba(255,255,255,0.8); font-size: 9px; font-weight: 700;
-    }
 
-    /* Controls & Settings */
-    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-    button { padding: 14px; border: 1px solid #ddd; border-radius: 12px; font-weight: 600; font-size: 14px; cursor: pointer; background: #fff; color: #333; }
+    button { padding: 14px; border-radius: 10px; font-weight: 700; font-family: var(--font-din); cursor: pointer; background: #fff; border: 1px solid #ddd; width: 100%; }
     button.primary { background: var(--primary); color: #fff; border: none; }
     
-    details { background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 12px; border: 1px solid #e5e5e5; }
-    summary { font-weight: 600; font-size: 13px; cursor: pointer; display: flex; justify-content: space-between; }
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    canvas { width: 100%; border: 1px solid red; display: none; margin-top: 10px; border-radius: 8px; }
+    .show-debug canvas { display: block; }
     
-    textarea { width: 100%; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 10px; font-size: 12px; font-family: monospace; background: #fafafa; margin-top: 10px; }
-    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-    .settings-grid label { font-size: 11px; display: block; margin-bottom: 4px; color: #666; font-weight: 600; }
-    input, select { width: 100%; box-sizing: border-box; padding: 8px; border-radius: 6px; border: 1px solid #ddd; background: #fff; }
-
-    /* Debug View */
-    #canvas { width: 100%; border: 2px solid red; display: none; margin-top: 10px; }
-    .show-debug #canvas { display: block; }
+    details { background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 8px; }
+    textarea { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; margin-top: 10px; }
   </style>
 </head>
 <body>
 
 <div class="wrap">
-  <div class="top-bar">
-    <span id="status">Loading Config...</span>
-    <span id="latency">- ms</span>
-  </div>
-
   <div id="resultCard" class="result-card">
-    <div class="res-label">Mapped Code</div>
+    <div class="res-label">System Mapping</div>
     <div id="outputVal" class="res-value">READY</div>
-    <div id="outputMeta" class="res-meta">Matched: <span id="outputKey"></span></div>
   </div>
 
   <div class="cam-card">
@@ -84,33 +61,25 @@
   </div>
 
   <div class="controls">
-    <button id="btnScan" class="primary">Scan Now</button>
-    <button id="btnAuto">Stop Auto</button>
+    <button id="btnScan" class="primary">MANUAL SCAN</button>
+    <button id="btnAuto">STOP AUTO</button>
   </div>
 
   <details>
-    <summary>Mapping Data & CSV</summary>
-    <div style="margin-top:10px; display:flex; gap:8px;">
-      <button onclick="fetchMapping()" style="font-size:12px; padding:8px; flex:1;">Sync CSV</button>
-      <button onclick="el('fileIn').click()" style="font-size:12px; padding:8px; flex:1;">Upload</button>
-      <input type="file" id="fileIn" accept=".csv" style="display:none">
-    </div>
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px;">
-      <div><div style="font-size:10px; font-weight:700;">EXTERNAL</div><textarea id="listA" rows="6"></textarea></div>
-      <div><div style="font-size:10px; font-weight:700;">INTERNAL</div><textarea id="listB" rows="6"></textarea></div>
+    <summary>Lists / Sync</summary>
+    <button onclick="fetchMapping()" style="margin-top:10px;">SYNC CSV FROM GITHUB</button>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:10px;">
+      <textarea id="listA" rows="5"></textarea>
+      <textarea id="listB" rows="5"></textarea>
     </div>
   </details>
 
   <details>
-    <summary>Camera Settings</summary>
-    <div class="settings-grid">
-      <div><label>Mode</label><select id="mode"><option value="ocr">Text (OCR)</option><option value="barcode">Barcode/QR</option></select></div>
-      <div><label>Scan Interval (ms)</label><input type="number" id="interval"></div>
-      <div><label>Contrast (0-50)</label><input type="range" id="contrast" min="0" max="50"></div>
-      <div><label>Lock Time (ms)</label><input type="number" id="lockTime"></div>
-      <div style="display:flex; align-items:center; grid-column: span 2;">
-        <label style="margin:0;"><input type="checkbox" id="debugCheck"> Show What Computer Sees</label>
-      </div>
+    <summary>OCR Settings</summary>
+    <div style="font-size:12px; margin-top:10px;">
+      <label>Contrast Boost</label>
+      <input type="range" id="contrast" min="0" max="60" value="35">
+      <label><input type="checkbox" id="debugCheck"> Show Processed Stream</label>
     </div>
   </details>
 
@@ -119,224 +88,146 @@
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const el = (id) => document.getElementById(id);
+  const el = (id) => document.getElementById(id);
   const video = el('video');
   const canvas = el('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   
-  let stream = null;
+  let worker = null;
   let timer = null;
   let busy = false;
   let auto = true;
-  let worker = null; // We will pre-load the worker
   
+  // IT Manager Defaults
   let config = {
-    scanIntervalMs: 1000,
-    successLockMs: 2500,
-    defaultContrast: 25,
-    minMatchScore: 0.8,
-    defaultMode: 'ocr',
-    cameraFacing: 'environment',
-    debugView: false
+    scanIntervalMs: 800,
+    successLockMs: 3000,
+    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."
   };
 
-  // --- BOOT SEQUENCE ---
   async function boot() {
-    try {
-      el('status').textContent = "1/3 Loading Config...";
-      await loadSettings();
-
-      el('status').textContent = "2/3 Loading Data...";
-      await loadInitialData();
-
-      el('status').textContent = "3/3 Warming Up OCR...";
-      await setupOCR();
-
-      el('status').textContent = "Starting Camera...";
-      await startCamera();
-      
-      el('status').textContent = "System Ready";
-    } catch (err) {
-      console.error("Boot failed:", err);
-      el('status').innerHTML = `<span style="color:red">Boot Error: ${err.message}</span>`;
-    }
-  }
-
-  async function loadSettings() {
-    try {
-      const res = await fetch('settings.json?t=' + Date.now());
-      if (res.ok) {
-        const json = await res.json();
-        config = { ...config, ...json };
-      }
-    } catch (e) { console.warn("Settings.json not found, using defaults."); }
+    el('outputVal').textContent = "LOADING...";
     
-    // Apply to UI
-    el('interval').value = config.scanIntervalMs;
-    el('lockTime').value = config.successLockMs;
-    el('contrast').value = config.defaultContrast;
-    el('mode').value = config.defaultMode;
-    if(config.debugView) el('debugCheck').checked = true;
-  }
+    // 1. Fetch JSON Config
+    try {
+      const res = await fetch('settings.json');
+      if(res.ok) config = {...config, ...(await res.json())};
+    } catch(e) {}
 
-  async function loadInitialData() {
+    // 2. Setup Tesseract for DIN 1451 specifics
+    worker = await Tesseract.createWorker('eng');
+    await worker.setParameters({
+      tessedit_char_whitelist: config.tessedit_char_whitelist,
+      tessedit_pageseg_mode: '7', // Single line mode
+    });
+
+    // 3. Load Data
     const savedA = localStorage.getItem('mapA');
-    if (savedA) {
+    if(savedA) {
       el('listA').value = savedA;
       el('listB').value = localStorage.getItem('mapB');
     } else {
       await fetchMapping();
     }
-  }
 
-  async function setupOCR() {
-    // Pre-initialize Tesseract worker so the first scan is instant
-    worker = await Tesseract.createWorker('eng');
-  }
-
-  async function startCamera() {
-    if (stream) return;
-    const constraints = {
-      video: { 
-        facingMode: config.cameraFacing,
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
-    };
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-    video.srcObject = stream;
-    // Wait for video to actually start playing
-    return new Promise((resolve) => {
+    // 4. Start Video
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 } }
+      });
+      video.srcObject = stream;
       video.onloadedmetadata = () => {
+        el('outputVal').textContent = "READY";
         startAuto();
-        resolve();
       };
-    });
+    } catch(e) { el('outputVal').textContent = "CAM ERROR"; }
   }
-
-  // --- SCANNING ENGINE ---
 
   async function scan() {
-    if (busy || !stream || !worker) return;
+    if(busy || !worker) return;
     busy = true;
-    const t0 = performance.now();
+
+    const w = video.videoWidth, h = video.videoHeight;
+    const sw = w * 0.7, sh = h * 0.12; // Narrower slit for DIN stability
+    const sx = (w - sw) / 2, sy = (h - sh) / 2;
+
+    canvas.width = sw; canvas.height = sh;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    // Pre-processing for High Legibility
+    const img = ctx.getImageData(0, 0, sw, sh);
+    const d = img.data;
+    const boost = (parseInt(el('contrast').value) + 100) / 100;
+    
+    for(let i=0; i<d.length; i+=4) {
+      let v = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114);
+      v = (v - 128) * boost + 128; // Contrast
+      d[i] = d[i+1] = d[i+2] = v > 150 ? 255 : 0; // Hard Binarization for DIN 1451
+    }
+    ctx.putImageData(img, 0, 0);
 
     try {
-      const w = video.videoWidth;
-      const h = video.videoHeight;
-      if (w === 0) throw new Error("Video not ready");
-
-      // Slit Scan Crop
-      const sw = w * 0.7; 
-      const sh = h * 0.15; 
-      const sx = (w - sw) / 2;
-      const sy = (h - sh) / 2;
-
-      canvas.width = sw;
-      canvas.height = sh;
-      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-
-      // Contrast processing
-      if (el('mode').value === 'ocr') {
-        const img = ctx.getImageData(0, 0, sw, sh);
-        const d = img.data;
-        const boost = (Number(el('contrast').value) + 100) / 100;
-        for (let i = 0; i < d.length; i += 4) {
-          let v = (d[i] * 0.3 + d[i+1] * 0.59 + d[i+2] * 0.11);
-          v = (v - 128) * boost + 128;
-          d[i] = d[i+1] = d[i+2] = v > 255 ? 255 : (v < 0 ? 0 : v);
-        }
-        ctx.putImageData(img, 0, 0);
-      }
-
-      let resultText = "";
-      if (el('mode').value === 'barcode' && window.BarcodeDetector) {
-        const bd = new BarcodeDetector();
-        const bcs = await bd.detect(canvas);
-        resultText = bcs[0]?.rawValue || "";
-      } else {
-        // Use the pre-warmed worker
-        const { data: { text } } = await worker.recognize(canvas);
-        resultText = text;
-      }
-
-      const clean = resultText.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const { data: { text } } = await worker.recognize(canvas);
+      const clean = text.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
       const listA = el('listA').value.split('\n').map(x => x.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
-      
-      const idx = listA.findIndex(val => val && val.length > 1 && clean.includes(val));
+      const idx = listA.findIndex(val => val && val.length > 2 && clean.includes(val));
 
-      if (idx > -1) {
-        foundMatch(el('listB').value.split('\n')[idx], el('listA').value.split('\n')[idx]);
-      } else {
-        if (!el('resultCard').classList.contains('success')) {
-           el('outputVal').textContent = "SCANNING";
-           el('resultCard').className = "result-card";
-           el('outputMeta').style.display = "none";
-        }
+      if(idx > -1) {
+        foundMatch(el('listB').value.split('\n')[idx]);
       }
-    } catch (e) {
-      console.error("Scan Error:", e);
-    } finally {
-      el('latency').textContent = Math.round(performance.now() - t0) + "ms";
-      busy = false;
-    }
+    } catch(e) {}
+    busy = false;
   }
 
-  // --- HELPERS ---
+  function foundMatch(val) {
+    el('outputVal').textContent = val;
+    el('resultCard').className = "result-card success";
+    if(auto) {
+      clearInterval(timer);
+      setTimeout(() => { if(auto) startAuto(); }, config.successLockMs);
+    }
+  }
 
   function startAuto() {
-    stopAuto(true);
+    if(timer) clearInterval(timer);
+    timer = setInterval(scan, config.scanIntervalMs);
     auto = true;
-    const interval = parseInt(el('interval').value) || 1000;
-    timer = setInterval(scan, interval);
-    el('btnAuto').textContent = "Stop Auto";
+    el('btnAuto').textContent = "STOP AUTO";
   }
 
-  function stopAuto(isTemp = false) {
-    if (timer) clearInterval(timer);
+  function stopAuto() {
+    clearInterval(timer);
     timer = null;
-    if (!isTemp) {
-      auto = false;
-      el('btnAuto').textContent = "Start Auto";
-    }
-  }
-
-  function foundMatch(val, key) {
-    el('outputVal').textContent = val;
-    el('outputKey').textContent = key;
-    el('outputMeta').style.display = "block";
-    el('resultCard').className = "result-card success";
-    
-    if (auto) {
-      stopAuto(true);
-      const lock = parseInt(el('lockTime').value) || 2500;
-      setTimeout(() => { if (auto) startAuto(); }, lock);
-    }
+    auto = false;
+    el('btnAuto').textContent = "START AUTO";
   }
 
   async function fetchMapping() {
     try {
       const r = await fetch('mapping.csv?t=' + Date.now());
-      if (r.ok) {
+      if(r.ok) {
         const txt = await r.text();
         const lines = txt.split(/\r?\n/).filter(x => x.includes(','));
         const a = [], b = [];
         lines.forEach(l => {
           const p = l.split(',');
-          a.push(p[0].trim());
-          b.push(p[1].trim());
+          a.push(p[0].trim()); b.push(p[1].trim());
         });
         el('listA').value = a.join('\n');
         el('listB').value = b.join('\n');
         localStorage.setItem('mapA', el('listA').value);
         localStorage.setItem('mapB', el('listB').value);
       }
-    } catch (e) { console.warn("CSV fetch failed."); }
+    } catch(e) {}
   }
 
-  // Bind Events
+  el('debugCheck').onchange = (e) => {
+    if(e.target.checked) document.body.classList.add('show-debug');
+    else document.body.classList.remove('show-debug');
+  };
   el('btnAuto').onclick = () => auto ? stopAuto() : startAuto();
   el('btnScan').onclick = scan;
+  
   window.onload = boot;
 </script>
 </body>
